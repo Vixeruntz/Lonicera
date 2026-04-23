@@ -1,0 +1,21 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 1. Articles Collection
+    match /articles/{articleId} {
+      // Anyone can read a cached article if they know the ID
+      // We don't allow list queries (allow list: if false;) to prevent scraping the entire DB.
+      allow get: if true;
+      allow list: if false;
+      
+      // All writes are performed by the backend via firebase-admin, which bypasses rules.
+      allow write: if false;
+    }
+  }
+}

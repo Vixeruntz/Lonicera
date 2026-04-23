@@ -1,0 +1,27 @@
+{
+  "entities": {
+    "Article": {
+      "title": "Article",
+      "description": "A cached deep-read article generated from a video.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "subtitle": { "type": "string" },
+        "author": { "type": "string" },
+        "tags": { "type": "array", "items": { "type": "string" } },
+        "content": { "type": "string" },
+        "estimatedReadingTime": { "type": "number" },
+        "coverImageUrl": { "type": "string" },
+        "sourceUrl": { "type": "string" },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["title", "content", "sourceUrl"]
+    }
+  },
+  "firestore": {
+    "/articles/{articleId}": {
+      "schema": "Article",
+      "description": "Cached articles keyed by an MD5 hash or unique ID of the source URL."
+    }
+  }
+}

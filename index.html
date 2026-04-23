@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>VideoAlchemist</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.tailwindcss.com?plugins=typography"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Merriweather:ital,wght@0,300;0,400;0,700;1,300;1,400&family=Noto+Sans+SC:wght@300;400;500;700&family=Noto+Serif+SC:wght@300;400;600;700&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet" crossorigin="anonymous">
+    <script>
+      tailwind.config = {
+        darkMode: 'class',
+        theme: {
+          extend: {
+            fontFamily: {
+              serif: ['"Noto Serif SC"', 'Merriweather', 'serif'],
+              sans: ['"Noto Sans SC"', 'Inter', 'sans-serif'],
+            },
+            colors: {
+              paper: 'var(--color-paper)', 
+              ink: 'var(--color-ink)',   
+              accent: 'var(--color-accent)', 
+            },
+            typography: (theme) => ({
+              DEFAULT: {
+                css: {
+                  color: 'var(--color-ink)',
+                  fontFamily: '"Noto Serif SC", serif',
+                  '--tw-prose-body': 'var(--color-ink)',
+                  '--tw-prose-headings': 'var(--color-ink)',
+                  '--tw-prose-quotes': 'var(--color-quotes)',
+                  maxWidth: '65ch', // Optimal reading width
+                },
+              },
+            }),
+          }
+        }
+      }
+    </script>
+    <style>
+      :root {
+        --color-paper: #f9f7f1;
+        --color-ink: #262626;
+        --color-accent: #c2410c;
+        --color-quotes: #44403c;
+      }
+      .dark {
+        --color-paper: #171717;
+        --color-ink: #d4d4d4;
+        --color-accent: #f59e0b;
+        --color-quotes: #a3a3a3;
+      }
+      body {
+        background-color: var(--color-paper);
+        color: var(--color-ink);
+        transition: background-color 0.5s ease, color 0.5s ease;
+      }
+      /* Custom Scrollbar */
+      ::-webkit-scrollbar {
+        width: 6px;
+      }
+      ::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      ::-webkit-scrollbar-thumb {
+        background: #d6d3cd;
+        border-radius: 3px;
+      }
+      .dark ::-webkit-scrollbar-thumb {
+        background: #525252;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: #a8a29e;
+      }
+      
+      /* Smooth fade for images */
+      img {
+        transition: filter 0.3s ease-in-out;
+      }
+    </style>
+    <!-- Use bundle for html2pdf to ensure dependencies are present -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+  <script type="importmap">
+{
+  "imports": {
+    "react-dom/": "https://esm.sh/react-dom@^19.2.4/",
+    "react/": "https://esm.sh/react@^19.2.4/",
+    "react": "https://esm.sh/react@^19.2.4",
+    "lucide-react": "https://esm.sh/lucide-react@^0.563.0",
+    "react-markdown": "https://esm.sh/react-markdown@^10.1.0",
+    "@google/genai": "https://esm.sh/@google/genai@^1.40.0",
+    "html-to-image": "https://esm.sh/html-to-image@^1.11.11",
+    "motion": "https://esm.sh/motion@^12.4.9"
+  }
+}
+</script>
+<link rel="stylesheet" href="/index.css">
+</head>
+  <body>
+    <div id="root"></div>
+  <script type="module" src="/index.tsx"></script>
+</body>
+</html>
