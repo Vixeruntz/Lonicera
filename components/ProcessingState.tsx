@@ -52,10 +52,10 @@ export const ProcessingState: React.FC<ProcessingStateProps> = ({ state, errorMe
   }, []);
 
   const steps = [
-    { id: LoadingState.SEARCHING, label: '正在全网检索信息以充实知识图谱', icon: Search },
-    { id: LoadingState.ANALYZING, label: '提取视频原片并构建多模态语义树', icon: Brain },
-    { id: LoadingState.OUTLINING, label: '主编 AI 正在推演具有戏剧张力的文章大纲', icon: PenTool },
-    { id: LoadingState.DRAFTING, label: '万字写作流：数位专栏 AI 并发分形撰写章节', icon: Sparkles },
+    { id: LoadingState.SEARCHING, label: '服务端正在校验链接并检查缓存命中', icon: Search },
+    { id: LoadingState.ANALYZING, label: '正在提取字幕与元数据，并验证来源能力', icon: Brain },
+    { id: LoadingState.OUTLINING, label: '受控模型正在整理结构化长文草稿', icon: PenTool },
+    { id: LoadingState.DRAFTING, label: '正在完成最终正文并写入服务端缓存', icon: Sparkles },
   ];
 
   let currentStepIndex = steps.findIndex(s => s.id === state);
@@ -118,7 +118,7 @@ export const ProcessingState: React.FC<ProcessingStateProps> = ({ state, errorMe
       {state === LoadingState.ERROR && (
         <div className="mt-8 p-4 bg-red-50 text-red-800 rounded-lg text-sm text-center border border-red-100 flex flex-col gap-3 shadow-sm w-full">
            <span className="font-semibold">提取中止</span>
-           <span className="opacity-90 leading-relaxed">可能是视频无法访问、不包含语音轨，或者超出了单次回忆额度。</span>
+           <span className="opacity-90 leading-relaxed">可能是视频来源暂未启用、字幕不可提取、请求参数不合法，或命中了服务端治理规则。</span>
            {errorMessage && (
              <div className="p-2 bg-white/50 rounded-md font-mono text-[10px] opacity-70 break-all text-left">
                  {errorMessage}

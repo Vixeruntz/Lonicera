@@ -1,5 +1,5 @@
 {
   "name": "视频炼金术：深度阅读",
-  "description": "通过深度AI分析，将YouTube和Bilibili视频转化为高质量的长篇书籍章节。",
+  "description": "通过服务端受控流程，将已启用视频源的字幕整理为高质量中文长文。",
   "requestFramePermissions": []
 }
