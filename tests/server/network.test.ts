@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { extractBilibiliVideoId, extractYouTubeVideoId } from '../../server/adapters/video';
+import { VideoSourceRegistry, extractYouTubeVideoId } from '../../server/adapters/video';
+import { AppError } from '../../server/errors';
 import { assertSafeRemoteUrl } from '../../server/utils/network';
 
 test('extractYouTubeVideoId handles common YouTube URL shapes', () => {
@@ -19,14 +20,22 @@ test('extractYouTubeVideoId handles common YouTube URL shapes', () => {
   );
 });
 
-test('extractBilibiliVideoId handles BV and av identifiers', () => {
-  assert.equal(
-    extractBilibiliVideoId(new URL('https://www.bilibili.com/video/BV1xx411c7mD/')),
-    'BV1xx411c7mD'
-  );
-  assert.equal(
-    extractBilibiliVideoId(new URL('https://www.bilibili.com/video/av170001')),
-    'av170001'
+test('VideoSourceRegistry rejects bilibili URLs explicitly', async () => {
+  const registry = new VideoSourceRegistry({
+    timeoutMs: 2000,
+    logger: {
+      info() {},
+      warn() {},
+      error() {},
+    },
+  });
+
+  await assert.rejects(
+    () => registry.extractFromUrl('https://www.bilibili.com/video/BV1xx411c7mD/'),
+    (error: unknown) =>
+      error instanceof AppError &&
+      error.code === 'unsupported_video_url' &&
+      error.message.includes('YouTube')
   );
 });
 

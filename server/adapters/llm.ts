@@ -1,7 +1,15 @@
 import { GoogleGenAI } from '@google/genai';
 import OpenAI from 'openai';
 
-import { ProviderCapability } from '../../types';
+import {
+  ARK_CODING_PLAN_BASE_URL,
+  ARK_CODING_PLAN_MODEL_ID,
+  GEMINI_MODEL_IDS,
+  ProviderCapability,
+  ProviderId,
+  ProviderModelId,
+  ProviderModelOption,
+} from '../../types';
 import { AppError } from '../errors';
 import { StructuredLogger } from '../logger';
 import { GeneratedArticle, generatedArticleSchema } from '../schemas';
@@ -15,25 +23,36 @@ export interface ArticleGenerationInput {
   transcript: string;
 }
 
+export interface ArticleGenerationRequest {
+  providerId: ProviderId;
+  modelId: ProviderModelId;
+  apiKey?: string;
+}
+
 export interface GeneratedArticleResult extends GeneratedArticle {
-  modelId: string;
-  providerId: string;
+  modelId: ProviderModelId;
+  providerId: ProviderId;
   providerLabel: string;
 }
 
 export interface LlmProviderService {
   getCapabilities(): ProviderCapability[];
-  getDefaultProviderId(): string | null;
+  getDefaultProviderId(): ProviderId | null;
   generateArticle(
-    providerId: string | undefined,
+    request: ArticleGenerationRequest,
     input: ArticleGenerationInput,
     timeoutMs: number
   ): Promise<GeneratedArticleResult>;
 }
 
+interface ProviderInvocation {
+  modelId: ProviderModelId;
+  apiKey?: string;
+}
+
 interface LlmProviderAdapter {
   readonly capability: ProviderCapability;
-  generateArticle(input: ArticleGenerationInput): Promise<GeneratedArticleResult>;
+  generateArticle(request: ProviderInvocation, input: ArticleGenerationInput): Promise<GeneratedArticleResult>;
 }
 
 const JSON_SHAPE = `{
@@ -43,6 +62,27 @@ const JSON_SHAPE = `{
   "tags": ["标签1", "标签2"],
   "content": "Markdown 正文，必须包含多个以 ## 开头的章节标题"
 }`;
+
+const GEMINI_MODELS: ProviderModelOption[] = [
+  {
+    id: 'gemini-3-pro-preview',
+    label: 'Gemini 3 Pro',
+    description: '更强的推理与长文写作质量，适合高保真整理。',
+  },
+  {
+    id: 'gemini-3-flash-preview',
+    label: 'Gemini 3 Flash',
+    description: '更快的响应速度，适合更轻量的整理任务。',
+  },
+];
+
+const ARK_MODELS: ProviderModelOption[] = [
+  {
+    id: 'ark-code-latest',
+    label: 'ark-code-latest',
+    description: '固定接入火山方舟 Coding Plan。',
+  },
+];
 
 function buildPrompt(input: ArticleGenerationInput) {
   return [
@@ -82,7 +122,8 @@ function extractJsonObject(raw: string) {
 
 function normalizeGeneratedArticle(
   parsed: GeneratedArticle,
-  provider: ProviderCapability
+  provider: ProviderCapability,
+  model: ProviderModelOption
 ): GeneratedArticleResult {
   const tags = parsed.tags.map((tag) => tag.trim()).filter(Boolean).slice(0, 6);
   return {
@@ -90,31 +131,68 @@ function normalizeGeneratedArticle(
     subtitle: parsed.subtitle.trim(),
     tags: tags.length > 0 ? tags : ['深度阅读'],
     content: parsed.content.trim(),
-    modelId: provider.model,
+    modelId: model.id,
     providerId: provider.id,
     providerLabel: provider.label,
   };
 }
 
-class GeminiProviderAdapter implements LlmProviderAdapter {
-  public readonly capability: ProviderCapability;
-  private readonly client: GoogleGenAI;
+abstract class BaseProviderAdapter implements LlmProviderAdapter {
+  constructor(
+    public readonly capability: ProviderCapability,
+    private readonly defaultApiKey?: string
+  ) {}
 
-  constructor(apiKey: string, model: string) {
-    this.capability = {
-      id: 'gemini',
-      label: 'Gemini',
-      kind: 'gemini',
-      model,
-      enabled: true,
-      description: 'Server-managed Gemini provider',
-    };
-    this.client = new GoogleGenAI({ apiKey });
+  protected resolveModel(modelId: ProviderModelId) {
+    const match = this.capability.models.find((candidate) => candidate.id === modelId);
+    if (!match) {
+      throw new AppError(
+        400,
+        'invalid_model',
+        `${this.capability.label} 不支持模型 ${modelId}。`
+      );
+    }
+    return match;
   }
 
-  async generateArticle(input: ArticleGenerationInput): Promise<GeneratedArticleResult> {
-    const response = await this.client.models.generateContent({
-      model: this.capability.model,
+  protected resolveApiKey(requestApiKey?: string) {
+    const apiKey = requestApiKey?.trim() || this.defaultApiKey;
+    if (!apiKey) {
+      throw new AppError(
+        400,
+        'missing_api_key',
+        `${this.capability.label} 缺少 API Key。请在设置中填写，或在服务端环境变量中配置默认密钥。`
+      );
+    }
+    return apiKey;
+  }
+
+  abstract generateArticle(request: ProviderInvocation, input: ArticleGenerationInput): Promise<GeneratedArticleResult>;
+}
+
+class GeminiProviderAdapter extends BaseProviderAdapter {
+  constructor(defaultApiKey?: string) {
+    super(
+      {
+        id: 'gemini',
+        label: 'Google Gemini',
+        kind: 'gemini',
+        defaultModelId: 'gemini-3-pro-preview',
+        models: GEMINI_MODELS,
+        enabled: true,
+        description: 'Google Gemini 官方预设，只允许选择受控模型白名单。',
+      },
+      defaultApiKey
+    );
+  }
+
+  async generateArticle(request: ProviderInvocation, input: ArticleGenerationInput): Promise<GeneratedArticleResult> {
+    const model = this.resolveModel(request.modelId);
+    const apiKey = this.resolveApiKey(request.apiKey);
+    const client = new GoogleGenAI({ apiKey });
+
+    const response = await client.models.generateContent({
+      model: model.id,
       contents: buildPrompt(input),
       config: {
         systemInstruction: buildSystemInstruction(),
@@ -129,32 +207,36 @@ class GeminiProviderAdapter implements LlmProviderAdapter {
     }
 
     const parsed = generatedArticleSchema.parse(JSON.parse(extractJsonObject(raw)));
-    return normalizeGeneratedArticle(parsed, this.capability);
+    return normalizeGeneratedArticle(parsed, this.capability, model);
   }
 }
 
-class OpenAiCompatibleProviderAdapter implements LlmProviderAdapter {
-  public readonly capability: ProviderCapability;
-  private readonly client: OpenAI;
-
-  constructor(config: { id: string; label: string; description: string; apiKey: string; baseUrl: string; model: string }) {
-    this.capability = {
-      id: config.id,
-      label: config.label,
-      kind: 'openai-compatible',
-      model: config.model,
-      enabled: true,
-      description: config.description,
-    };
-    this.client = new OpenAI({
-      apiKey: config.apiKey,
-      baseURL: config.baseUrl,
-    });
+class ArkCodingPlanProviderAdapter extends BaseProviderAdapter {
+  constructor(defaultApiKey?: string) {
+    super(
+      {
+        id: 'ark-coding-plan',
+        label: '火山方舟 Coding Plan',
+        kind: 'openai-compatible',
+        defaultModelId: ARK_CODING_PLAN_MODEL_ID,
+        models: ARK_MODELS,
+        enabled: true,
+        description: `固定接入 ${ARK_CODING_PLAN_BASE_URL}，不接受任意 Base URL。`,
+      },
+      defaultApiKey
+    );
   }
 
-  async generateArticle(input: ArticleGenerationInput): Promise<GeneratedArticleResult> {
-    const response = await this.client.chat.completions.create({
-      model: this.capability.model,
+  async generateArticle(request: ProviderInvocation, input: ArticleGenerationInput): Promise<GeneratedArticleResult> {
+    const model = this.resolveModel(request.modelId);
+    const apiKey = this.resolveApiKey(request.apiKey);
+    const client = new OpenAI({
+      apiKey,
+      baseURL: ARK_CODING_PLAN_BASE_URL,
+    });
+
+    const response = await client.chat.completions.create({
+      model: model.id,
       messages: [
         { role: 'system', content: buildSystemInstruction() },
         { role: 'user', content: buildPrompt(input) },
@@ -165,45 +247,29 @@ class OpenAiCompatibleProviderAdapter implements LlmProviderAdapter {
 
     const raw = response.choices[0]?.message?.content?.trim();
     if (!raw) {
-      throw new AppError(502, 'invalid_model_response', 'OpenAI-compatible provider 未返回正文。');
+      throw new AppError(502, 'invalid_model_response', '方舟 Coding Plan 未返回正文。');
     }
 
     const parsed = generatedArticleSchema.parse(JSON.parse(extractJsonObject(raw)));
-    return normalizeGeneratedArticle(parsed, this.capability);
+    return normalizeGeneratedArticle(parsed, this.capability, model);
   }
 }
 
 export class LlmProviderRegistry implements LlmProviderService {
-  private readonly providers = new Map<string, LlmProviderAdapter>();
+  private readonly providers = new Map<ProviderId, LlmProviderAdapter>();
 
-  constructor(
-    config: {
-      geminiApiKey?: string;
-      geminiModel: string;
-      openAiCompat?: {
-        id: string;
-        label: string;
-        description: string;
-        apiKey: string;
-        baseUrl: string;
-        model: string;
-      };
-      requestTimeoutMs: number;
-      logger: StructuredLogger;
-    }
-  ) {
-    if (config.geminiApiKey) {
-      this.providers.set('gemini', new GeminiProviderAdapter(config.geminiApiKey, config.geminiModel));
-    } else {
-      config.logger.warn('provider.gemini.disabled', { reason: 'GEMINI_API_KEY is not configured' });
-    }
+  constructor(config: { defaultApiKeys?: Partial<Record<ProviderId, string>>; logger: StructuredLogger }) {
+    this.providers.set('gemini', new GeminiProviderAdapter(config.defaultApiKeys?.gemini));
+    this.providers.set(
+      'ark-coding-plan',
+      new ArkCodingPlanProviderAdapter(config.defaultApiKeys?.['ark-coding-plan'])
+    );
 
-    if (config.openAiCompat) {
-      this.providers.set(
-        config.openAiCompat.id,
-        new OpenAiCompatibleProviderAdapter(config.openAiCompat)
-      );
-    }
+    config.logger.info('provider.registry.initialized', {
+      providerIds: Array.from(this.providers.keys()),
+      geminiModels: GEMINI_MODEL_IDS,
+      arkModel: ARK_CODING_PLAN_MODEL_ID,
+    });
   }
 
   getCapabilities() {
@@ -214,15 +280,22 @@ export class LlmProviderRegistry implements LlmProviderService {
     return this.getCapabilities()[0]?.id ?? null;
   }
 
-  async generateArticle(providerId: string | undefined, input: ArticleGenerationInput, timeoutMs: number) {
-    const provider = providerId
-      ? this.providers.get(providerId)
-      : this.providers.values().next().value;
-
+  async generateArticle(request: ArticleGenerationRequest, input: ArticleGenerationInput, timeoutMs: number) {
+    const provider = this.providers.get(request.providerId);
     if (!provider) {
-      throw new AppError(503, 'provider_unavailable', '服务器未配置任何可用的文章生成模型。');
+      throw new AppError(400, 'invalid_provider', `未知 provider: ${request.providerId}`);
     }
 
-    return withTimeout(provider.generateArticle(input), timeoutMs, `${provider.capability.label} article generation`);
+    return withTimeout(
+      provider.generateArticle(
+        {
+          modelId: request.modelId,
+          apiKey: request.apiKey,
+        },
+        input
+      ),
+      timeoutMs,
+      `${provider.capability.label} article generation`
+    );
   }
 }

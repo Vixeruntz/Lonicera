@@ -12,6 +12,7 @@ const noopLogger = {
 
 test('ArticlePipeline deduplicates concurrent work and serves cached results afterwards', async () => {
   let providerCalls = 0;
+  const modelsSeen: string[] = [];
 
   const pipeline = new ArticlePipeline({
     cacheStore: new InMemoryArticleCacheStore(),
@@ -36,9 +37,13 @@ test('ArticlePipeline deduplicates concurrent work and serves cached results aft
         return [
           {
             id: 'gemini',
-            label: 'Gemini',
+            label: 'Google Gemini',
             kind: 'gemini' as const,
-            model: 'gemini-test',
+            defaultModelId: 'gemini-3-pro-preview',
+            models: [
+              { id: 'gemini-3-pro-preview', label: 'Gemini 3 Pro' },
+              { id: 'gemini-3-flash-preview', label: 'Gemini 3 Flash' },
+            ],
             enabled: true,
           },
         ];
@@ -46,8 +51,9 @@ test('ArticlePipeline deduplicates concurrent work and serves cached results aft
       getDefaultProviderId() {
         return 'gemini';
       },
-      async generateArticle() {
+      async generateArticle(request) {
         providerCalls += 1;
+        modelsSeen.push(request.modelId);
         await new Promise((resolve) => setTimeout(resolve, 10));
         return {
           title: '测试文章',
@@ -56,8 +62,8 @@ test('ArticlePipeline deduplicates concurrent work and serves cached results aft
           tags: ['测试'],
           content: '## 第一章\n\n' + '内容'.repeat(140),
           providerId: 'gemini',
-          providerLabel: 'Gemini',
-          modelId: 'gemini-test',
+          providerLabel: 'Google Gemini',
+          modelId: request.modelId,
         };
       },
     },
@@ -68,10 +74,14 @@ test('ArticlePipeline deduplicates concurrent work and serves cached results aft
   const [first, second] = await Promise.all([
     pipeline.generateArticle({
       videoUrl: 'https://www.youtube.com/watch?v=UF8uR6Z6KLc',
+      providerId: 'gemini',
+      modelId: 'gemini-3-pro-preview',
       requestId: 'request-1',
     }),
     pipeline.generateArticle({
       videoUrl: 'https://www.youtube.com/watch?v=UF8uR6Z6KLc',
+      providerId: 'gemini',
+      modelId: 'gemini-3-pro-preview',
       requestId: 'request-2',
     }),
   ]);
@@ -82,10 +92,23 @@ test('ArticlePipeline deduplicates concurrent work and serves cached results aft
 
   const third = await pipeline.generateArticle({
     videoUrl: 'https://www.youtube.com/watch?v=UF8uR6Z6KLc',
+    providerId: 'gemini',
+    modelId: 'gemini-3-pro-preview',
     requestId: 'request-3',
   });
 
   assert.equal(providerCalls, 1);
   assert.equal(third.meta.cached, true);
   assert.equal(third.article.title, '测试文章');
+
+  const fourth = await pipeline.generateArticle({
+    videoUrl: 'https://www.youtube.com/watch?v=UF8uR6Z6KLc',
+    providerId: 'gemini',
+    modelId: 'gemini-3-flash-preview',
+    requestId: 'request-4',
+  });
+
+  assert.equal(providerCalls, 2);
+  assert.equal(fourth.meta.cached, false);
+  assert.deepEqual(modelsSeen, ['gemini-3-pro-preview', 'gemini-3-flash-preview']);
 });

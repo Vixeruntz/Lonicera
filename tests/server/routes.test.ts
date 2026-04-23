@@ -13,14 +13,25 @@ function createFakePipeline(): PipelineService {
       return {
         sources: [
           { id: 'youtube', label: 'YouTube', enabled: true },
-          { id: 'bilibili', label: 'Bilibili', enabled: false, reason: 'disabled in test' },
         ],
         providers: [
           {
             id: 'gemini',
-            label: 'Gemini',
+            label: 'Google Gemini',
             kind: 'gemini',
-            model: 'gemini-test',
+            defaultModelId: 'gemini-3-pro-preview',
+            models: [
+              { id: 'gemini-3-pro-preview', label: 'Gemini 3 Pro' },
+              { id: 'gemini-3-flash-preview', label: 'Gemini 3 Flash' },
+            ],
+            enabled: true,
+          },
+          {
+            id: 'ark-coding-plan',
+            label: '火山方舟 Coding Plan',
+            kind: 'openai-compatible',
+            defaultModelId: 'ark-code-latest',
+            models: [{ id: 'ark-code-latest', label: 'ark-code-latest' }],
             enabled: true,
           },
         ],
@@ -28,7 +39,7 @@ function createFakePipeline(): PipelineService {
         cacheTtlHours: 24,
       };
     },
-    async generateArticle({ videoUrl, providerId }) {
+    async generateArticle({ videoUrl, providerId, modelId }) {
       return {
         article: {
           title: '测试文章',
@@ -42,8 +53,8 @@ function createFakePipeline(): PipelineService {
         meta: {
           sourceId: 'youtube',
           providerId: providerId ?? 'gemini',
-          providerLabel: 'Gemini',
-          modelId: 'gemini-test',
+          providerLabel: providerId === 'ark-coding-plan' ? '火山方舟 Coding Plan' : 'Google Gemini',
+          modelId,
           cacheKey: 'cache-key',
           cached: false,
           createdAt: Date.now(),
@@ -99,6 +110,7 @@ test('GET /api/capabilities returns backend-managed capabilities', async () => {
   assert.equal(response.status, 200);
   assert.equal(response.body.defaultProviderId, 'gemini');
   assert.equal(response.body.sources[0].id, 'youtube');
+  assert.equal(response.body.providers[0].models.length, 2);
 });
 
 test('POST /api/articles rejects unexpected client-controlled cache payloads', async () => {
@@ -121,6 +133,7 @@ test('POST /api/articles rejects unexpected client-controlled cache payloads', a
     body: {
       videoUrl: 'https://www.youtube.com/watch?v=UF8uR6Z6KLc',
       providerId: 'gemini',
+      modelId: 'gemini-3-pro-preview',
       cacheData: {
         title: 'malicious overwrite',
       },
@@ -129,6 +142,35 @@ test('POST /api/articles rejects unexpected client-controlled cache payloads', a
 
   assert.equal(response.status, 400);
   assert.equal(wasCalled, false);
+});
+
+test('POST /api/articles rejects missing or invalid model selection', async () => {
+  const app = createApp({
+    pipeline: createFakePipeline(),
+    logger: createLogger(),
+  });
+
+  const missingModelResponse = await performRequest(app, {
+    method: 'POST',
+    url: '/api/articles',
+    body: {
+      videoUrl: 'https://www.youtube.com/watch?v=UF8uR6Z6KLc',
+      providerId: 'gemini',
+    },
+  });
+
+  const invalidModelResponse = await performRequest(app, {
+    method: 'POST',
+    url: '/api/articles',
+    body: {
+      videoUrl: 'https://www.youtube.com/watch?v=UF8uR6Z6KLc',
+      providerId: 'ark-coding-plan',
+      modelId: 'gemini-3-pro-preview',
+    },
+  });
+
+  assert.equal(missingModelResponse.status, 400);
+  assert.equal(invalidModelResponse.status, 400);
 });
 
 test('POST /api/cache is no longer a public write surface', async () => {

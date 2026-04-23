@@ -13,11 +13,17 @@ import { createLogger, StructuredLogger } from './server/logger';
 import { analyzeArticleRequestSchema } from './server/schemas';
 import { ArticlePipeline } from './server/services/article-pipeline';
 import { FileArticleCacheStore } from './server/services/cache-store';
-import { AppCapabilities, AnalyzeArticleResponse } from './types';
+import { AnalyzeArticleResponse, AppCapabilities, ProviderId, ProviderModelId } from './types';
 
 export interface PipelineService {
   getCapabilities(): AppCapabilities;
-  generateArticle(input: { videoUrl: string; providerId?: string; requestId: string }): Promise<AnalyzeArticleResponse>;
+  generateArticle(input: {
+    videoUrl: string;
+    providerId: ProviderId;
+    modelId: ProviderModelId;
+    apiKey?: string;
+    requestId: string;
+  }): Promise<AnalyzeArticleResponse>;
 }
 
 interface AppServices {
@@ -48,15 +54,14 @@ export function buildDefaultServices(config?: AppConfig, logger?: StructuredLogg
     cacheStore,
     cacheTtlHours: resolvedConfig.cacheTtlHours,
     videoSources: new VideoSourceRegistry({
-      enableBilibili: resolvedConfig.enableBilibili,
       timeoutMs: resolvedConfig.externalRequestTimeoutMs,
       logger: resolvedLogger,
     }),
     providers: new LlmProviderRegistry({
-      geminiApiKey: resolvedConfig.geminiApiKey,
-      geminiModel: resolvedConfig.geminiModel,
-      openAiCompat: resolvedConfig.openAiCompat,
-      requestTimeoutMs: resolvedConfig.articleGenerationTimeoutMs,
+      defaultApiKeys: {
+        gemini: resolvedConfig.geminiApiKey,
+        'ark-coding-plan': resolvedConfig.arkCodingPlanApiKey,
+      },
       logger: resolvedLogger,
     }),
     logger: resolvedLogger,
@@ -122,6 +127,8 @@ export function createApp(services: AppServices = buildDefaultServices()) {
         const payload = await services.pipeline.generateArticle({
           videoUrl: parsed.videoUrl,
           providerId: parsed.providerId,
+          modelId: parsed.modelId,
+          apiKey: parsed.apiKey,
           requestId: res.locals.requestId,
         });
         res.json(payload);

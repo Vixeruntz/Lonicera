@@ -1,18 +1,26 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
+import { AnimatePresence, motion } from 'motion/react';
 import { Moon, Sun } from 'lucide-react';
 
-import { HeroInput } from './components/HeroInput';
 import { ArticleReader } from './components/ArticleReader';
+import { HeroInput } from './components/HeroInput';
 import { ProcessingState } from './components/ProcessingState';
 import { SettingsModal } from './components/SettingsModal';
 import {
   AnalyzeArticleResponse,
   AppCapabilities,
-  LoadingState,
   ArticleData,
+  LoadingState,
   ProviderCapability,
+  ProviderId,
+  ProviderModelOption,
+  SelectedModelByProvider,
+  StoredProviderApiKeys,
 } from './types';
+
+const SELECTED_PROVIDER_STORAGE_KEY = 'selected_provider_id';
+const SELECTED_MODEL_STORAGE_KEY = 'selected_model_by_provider';
+const PROVIDER_KEYS_STORAGE_KEY = 'provider_api_keys';
 
 const PROGRESS_STAGES: Array<{ delayMs: number; state: LoadingState }> = [
   { delayMs: 0, state: LoadingState.SEARCHING },
@@ -20,6 +28,115 @@ const PROGRESS_STAGES: Array<{ delayMs: number; state: LoadingState }> = [
   { delayMs: 1200, state: LoadingState.OUTLINING },
   { delayMs: 2400, state: LoadingState.DRAFTING },
 ];
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function readJsonFromStorage(storageKey: string) {
+  const raw = localStorage.getItem(storageKey);
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(raw) as unknown;
+  } catch {
+    return null;
+  }
+}
+
+function parseApiKeys(storageKey: string, capabilities: AppCapabilities): StoredProviderApiKeys {
+  const parsed = readJsonFromStorage(storageKey);
+  if (!isRecord(parsed)) {
+    return {};
+  }
+
+  const result: StoredProviderApiKeys = {};
+  for (const provider of capabilities.providers) {
+    const candidate = parsed[provider.id];
+    if (typeof candidate === 'string' && candidate.trim()) {
+      result[provider.id] = candidate;
+    }
+  }
+  return result;
+}
+
+function parseSelectedModels(storageKey: string, capabilities: AppCapabilities): SelectedModelByProvider {
+  const parsed = readJsonFromStorage(storageKey);
+  const saved = isRecord(parsed) ? parsed : {};
+
+  const result: SelectedModelByProvider = {};
+  for (const provider of capabilities.providers) {
+    const candidate = saved[provider.id];
+    const selectedModel =
+      typeof candidate === 'string' &&
+      provider.models.some((model) => model.id === candidate)
+        ? candidate
+        : provider.defaultModelId;
+    result[provider.id] = selectedModel;
+  }
+  return result;
+}
+
+function getResolvedProvider(
+  capabilities: AppCapabilities | null,
+  selectedProviderId: ProviderId | '',
+  providerOverride?: string
+) {
+  if (!capabilities) {
+    return null;
+  }
+
+  if (providerOverride) {
+    const fromOverride = capabilities.providers.find((provider) => provider.id === providerOverride);
+    if (fromOverride) {
+      return fromOverride;
+    }
+  }
+
+  if (selectedProviderId) {
+    const fromSelection = capabilities.providers.find((provider) => provider.id === selectedProviderId);
+    if (fromSelection) {
+      return fromSelection;
+    }
+  }
+
+  if (capabilities.defaultProviderId) {
+    const fromDefault = capabilities.providers.find(
+      (provider) => provider.id === capabilities.defaultProviderId
+    );
+    if (fromDefault) {
+      return fromDefault;
+    }
+  }
+
+  return capabilities.providers[0] ?? null;
+}
+
+function getSelectedModelOption(
+  provider: ProviderCapability | null,
+  selectedModelByProvider: SelectedModelByProvider
+): ProviderModelOption | null {
+  if (!provider) {
+    return null;
+  }
+
+  const selectedModelId = selectedModelByProvider[provider.id] ?? provider.defaultModelId;
+  return provider.models.find((model) => model.id === selectedModelId) ?? provider.models[0] ?? null;
+}
+
+function persistSelectedProviderId(providerId: ProviderId) {
+  localStorage.setItem(SELECTED_PROVIDER_STORAGE_KEY, providerId);
+}
+
+function persistSelectedModels(nextModels: SelectedModelByProvider) {
+  localStorage.setItem(SELECTED_MODEL_STORAGE_KEY, JSON.stringify(nextModels));
+}
+
+function persistProviderApiKeys(nextApiKeys: StoredProviderApiKeys) {
+  localStorage.setItem(PROVIDER_KEYS_STORAGE_KEY, JSON.stringify(nextApiKeys));
+}
 
 async function parseApiError(response: Response) {
   const contentType = response.headers.get('content-type') || '';
@@ -37,7 +154,7 @@ function applyTheme(isDark: boolean) {
   localStorage.setItem('theme', isDark ? 'dark' : 'light');
 }
 
-function updateShareableUrl(videoUrl?: string, providerId?: string) {
+function updateShareableUrl(videoUrl?: string, providerId?: ProviderId) {
   const nextUrl = new URL(window.location.href);
 
   if (videoUrl) {
@@ -62,16 +179,23 @@ export default function App() {
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [capabilities, setCapabilities] = useState<AppCapabilities | null>(null);
   const [capabilitiesError, setCapabilitiesError] = useState('');
-  const [selectedProviderId, setSelectedProviderId] = useState('');
+  const [selectedProviderId, setSelectedProviderId] = useState<ProviderId | ''>('');
+  const [selectedModelByProvider, setSelectedModelByProvider] = useState<SelectedModelByProvider>({});
+  const [providerApiKeys, setProviderApiKeys] = useState<StoredProviderApiKeys>({});
 
   const progressTimerIds = useRef<number[]>([]);
   const requestAbortController = useRef<AbortController | null>(null);
   const didConsumeDeepLink = useRef(false);
 
-  const selectedProvider = useMemo<ProviderCapability | null>(() => {
-    if (!capabilities) return null;
-    return capabilities.providers.find((provider) => provider.id === selectedProviderId) ?? null;
-  }, [capabilities, selectedProviderId]);
+  const selectedProvider = useMemo(
+    () => getResolvedProvider(capabilities, selectedProviderId),
+    [capabilities, selectedProviderId]
+  );
+
+  const selectedModel = useMemo(
+    () => getSelectedModelOption(selectedProvider, selectedModelByProvider),
+    [selectedModelByProvider, selectedProvider]
+  );
 
   const clearPendingProgress = useCallback(() => {
     for (const timerId of progressTimerIds.current) {
@@ -112,18 +236,21 @@ export default function App() {
         }
 
         const payload = (await response.json()) as AppCapabilities;
+        const savedProviderId = localStorage.getItem(SELECTED_PROVIDER_STORAGE_KEY);
+        const preferredProvider =
+          getResolvedProvider(payload, '', savedProviderId ?? undefined)?.id ??
+          payload.defaultProviderId ??
+          payload.providers[0]?.id ??
+          '';
+
+        const nextSelectedModels = parseSelectedModels(SELECTED_MODEL_STORAGE_KEY, payload);
+        const nextApiKeys = parseApiKeys(PROVIDER_KEYS_STORAGE_KEY, payload);
+
         setCapabilities(payload);
         setCapabilitiesError('');
-
-        const savedProviderId = localStorage.getItem('selected_provider_id');
-        const preferredProvider =
-          (savedProviderId &&
-            payload.providers.some((provider) => provider.id === savedProviderId) &&
-            savedProviderId) ||
-          payload.defaultProviderId ||
-          payload.providers[0]?.id ||
-          '';
         setSelectedProviderId(preferredProvider);
+        setSelectedModelByProvider(nextSelectedModels);
+        setProviderApiKeys(nextApiKeys);
       } catch (error) {
         if (controller.signal.aborted) return;
         const message = error instanceof Error ? error.message : '无法加载服务端能力配置。';
@@ -140,9 +267,16 @@ export default function App() {
 
   const handleAnalyze = useCallback(
     async (videoUrl: string, providerOverride?: string) => {
-      const providerId = providerOverride || selectedProviderId || capabilities?.defaultProviderId || '';
-      if (!providerId) {
+      const provider = getResolvedProvider(capabilities, selectedProviderId, providerOverride);
+      if (!provider) {
         setErrorMsg('服务端当前没有可用的模型配置。');
+        setLoadingState(LoadingState.ERROR);
+        return;
+      }
+
+      const model = getSelectedModelOption(provider, selectedModelByProvider);
+      if (!model) {
+        setErrorMsg('当前 provider 没有可用模型。');
         setLoadingState(LoadingState.ERROR);
         return;
       }
@@ -161,7 +295,9 @@ export default function App() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             videoUrl,
-            providerId,
+            providerId: provider.id,
+            modelId: model.id,
+            apiKey: providerApiKeys[provider.id]?.trim() || undefined,
           }),
           signal: controller.signal,
         });
@@ -175,7 +311,15 @@ export default function App() {
         setArticle(payload.article);
         setLoadingState(LoadingState.COMPLETED);
         setSelectedProviderId(payload.meta.providerId);
-        localStorage.setItem('selected_provider_id', payload.meta.providerId);
+        persistSelectedProviderId(payload.meta.providerId);
+        setSelectedModelByProvider((current) => {
+          const next = {
+            ...current,
+            [payload.meta.providerId]: payload.meta.modelId,
+          };
+          persistSelectedModels(next);
+          return next;
+        });
         updateShareableUrl(payload.meta.canonicalUrl, payload.meta.providerId);
         window.scrollTo({ top: 0, behavior: 'smooth' });
       } catch (error) {
@@ -187,7 +331,7 @@ export default function App() {
         setLoadingState(LoadingState.ERROR);
       }
     },
-    [capabilities?.defaultProviderId, clearPendingProgress, selectedProviderId, startProgress]
+    [capabilities, clearPendingProgress, providerApiKeys, selectedModelByProvider, selectedProviderId, startProgress]
   );
 
   useEffect(() => {
@@ -201,9 +345,9 @@ export default function App() {
       return;
     }
 
-    const deepLinkedProvider = params.get('provider');
+    const deepLinkedProvider = params.get('provider') ?? undefined;
     didConsumeDeepLink.current = true;
-    handleAnalyze(deepLinkedVideo, deepLinkedProvider || selectedProviderId);
+    handleAnalyze(deepLinkedVideo, deepLinkedProvider);
   }, [capabilities, handleAnalyze, selectedProviderId]);
 
   useEffect(() => {
@@ -228,9 +372,17 @@ export default function App() {
     updateShareableUrl();
   };
 
-  const handleSaveSettings = (providerId: string) => {
-    setSelectedProviderId(providerId);
-    localStorage.setItem('selected_provider_id', providerId);
+  const handleSaveSettings = (settings: {
+    providerId: ProviderId;
+    selectedModels: SelectedModelByProvider;
+    apiKeys: StoredProviderApiKeys;
+  }) => {
+    setSelectedProviderId(settings.providerId);
+    setSelectedModelByProvider(settings.selectedModels);
+    setProviderApiKeys(settings.apiKeys);
+    persistSelectedProviderId(settings.providerId);
+    persistSelectedModels(settings.selectedModels);
+    persistProviderApiKeys(settings.apiKeys);
   };
 
   const isReading = !!article && loadingState !== LoadingState.ERROR;
@@ -240,6 +392,8 @@ export default function App() {
       <SettingsModal
         capabilities={capabilities}
         selectedProviderId={selectedProviderId}
+        selectedModelByProvider={selectedModelByProvider}
+        providerApiKeys={providerApiKeys}
         onSave={handleSaveSettings}
         isReading={isReading}
       />
@@ -269,11 +423,12 @@ export default function App() {
               loadingState={loadingState}
               capabilities={capabilities}
               selectedProvider={selectedProvider}
+              selectedModel={selectedModel}
               capabilitiesError={capabilitiesError}
             />
             <footer className="fixed bottom-6 left-0 right-0 text-center text-xs text-stone-400 font-sans tracking-wide px-6">
-              {selectedProvider
-                ? `${selectedProvider.label} · ${selectedProvider.model}`
+              {selectedProvider && selectedModel
+                ? `${selectedProvider.label} · ${selectedModel.label}`
                 : '等待服务端能力配置'}
             </footer>
           </motion.div>

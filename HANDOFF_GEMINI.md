@@ -16,11 +16,12 @@ Now:
 
 - public generation entrypoint is `POST /api/articles`
 - capability discovery is `GET /api/capabilities`
-- provider configuration is server-side only
+- provider configuration is fixed to preset providers and model allowlists
 - request payloads are schema-validated with `zod`
-- remote provider base URLs are allowlisted and blocked from private/local targets
+- remote provider base URLs are not client-configurable; Ark Coding Plan is pinned to `https://ark.cn-beijing.volces.com/api/coding/v3`
 - cache writes are server-generated only
 - share links persist `video` and `provider` in the URL
+- Bilibili support was removed; only YouTube remains
 
 ## Important files
 
@@ -31,15 +32,15 @@ Now:
 - `server/services/article-pipeline.ts`
   Main pipeline: source extraction -> provider generation -> schema validation -> cache -> response.
 - `server/adapters/video.ts`
-  `VideoSourceAdapter` layer. YouTube is enabled; Bilibili is recognized but disabled by default.
+  `VideoSourceAdapter` layer. Only YouTube is supported.
 - `server/adapters/llm.ts`
-  `LLMProviderAdapter` layer for Gemini and server-managed OpenAI-compatible providers.
+  `LLMProviderAdapter` layer for Google Gemini and fixed Volcengine Ark Coding Plan.
 - `server/services/cache-store.ts`
   File-backed server cache at `.cache/articles.json`.
 - `App.tsx`
-  Frontend now only consumes backend capabilities and `/api/articles`.
+  Frontend now only consumes backend capabilities and `/api/articles`, while persisting local provider keys/model choices.
 - `components/SettingsModal.tsx`
-  Provider selector for server-enabled providers only.
+  Fixed provider preset UI for Gemini + Ark Coding Plan, local API keys, and Gemini model selection.
 - `tests/server/*`
   Unit coverage for URL parsing, HTTP validation, cache protection, and pipeline de-duplication.
 - `tests/e2e/share-link.spec.ts`
@@ -47,18 +48,45 @@ Now:
 
 ## Runtime config
 
-At least one provider must be configured server-side.
+Server defaults are optional because users can provide API keys locally in the browser.
 
 Primary variables:
 
 - `GEMINI_API_KEY`
-- `GEMINI_MODEL` optional, defaults to `gemini-2.5-pro`
-- `OPENAI_COMPAT_API_KEY`
-- `OPENAI_COMPAT_BASE_URL`
-- `OPENAI_COMPAT_MODEL`
-- `OPENAI_COMPAT_ALLOWED_HOSTS`
+- `ARK_CODING_PLAN_API_KEY`
 - `CACHE_TTL_HOURS`
-- `ENABLE_BILIBILI`
+
+Fixed provider/model matrix:
+
+- `gemini`
+  - `gemini-3-pro-preview`
+  - `gemini-3-flash-preview`
+- `ark-coding-plan`
+  - `ark-code-latest`
+
+## Continue-from-here checklist
+
+If Gemini / AI Studio continues from this branch, the fastest onboarding order is:
+
+1. read `types.ts`
+   confirm the fixed provider IDs, model IDs, and capability shapes first
+2. read `server/schemas.ts`
+   this defines the public request contract and the provider/model allowlist rules
+3. read `server/adapters/llm.ts`
+   this is the source of truth for provider presets, request-level API keys, and fixed Ark endpoint behavior
+4. read `server/services/article-pipeline.ts`
+   this shows cache-key composition and the end-to-end generation pipeline
+5. read `App.tsx` and `components/SettingsModal.tsx`
+   this is where localStorage persistence and the Gemini model switcher live
+6. run `npm run test:unit && npm run build && npm run test:e2e`
+   use these as the minimum regression gate before any follow-up change
+
+## Guardrails for follow-up work
+
+- Do not reintroduce arbitrary `baseUrl` or free-form model input from the browser.
+- Do not re-add Bilibili as a hidden fallback path; if it returns, it should come back as a fully implemented source with explicit capability exposure.
+- Keep `providerId + modelId + canonicalUrl` as part of the cache identity unless there is a deliberate cache migration.
+- Keep API keys out of URLs, logs, cache records, and share links.
 
 ## Commands
 
@@ -77,12 +105,12 @@ The current published changes were validated with:
 
 ## Known limitation
 
-Bilibili is not yet implemented end-to-end. The adapter is explicit and will fail clearly instead of silently falling back to title-only generation.
+Share links intentionally omit `modelId` and `apiKey`. Reproducing the exact Gemini model therefore depends on the receiving browser's saved local model preference.
 
 ## Recommended next task
 
 If continuing from here, the highest-value next step is:
 
-1. implement real Bilibili transcript and metadata extraction
-2. keep the explicit capability toggle
-3. add source-specific tests similar to the YouTube path
+1. add provider-specific UX hints for quota / timeout / latency tradeoffs
+2. consider encrypting locally stored API keys or moving them to browser session storage
+3. reduce the large frontend bundle by code-splitting markdown/export dependencies

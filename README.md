@@ -10,8 +10,10 @@
 
 当前能力：
 
-- 视频源：YouTube 已启用；Bilibili 适配器已接入路由层，但默认禁用，未启用时会显式报错
-- 模型：由服务端环境变量配置，前端只能选择后端已启用的 provider
+- 视频源：仅支持 YouTube
+- 模型：固定 provider 预设，前端只能在受控模型白名单中选择
+  - Google Gemini: `gemini-3-pro-preview` / `gemini-3-flash-preview`
+  - 火山方舟 Coding Plan: `ark-code-latest`（固定 endpoint `https://ark.cn-beijing.volces.com/api/coding/v3`）
 - 缓存：服务端文件缓存，默认写入 `.cache/articles.json`，带 TTL 和去重键
 
 ## 本地运行
@@ -20,18 +22,18 @@
 
 1. 安装依赖
    `npm install`
-2. 至少配置一个服务端 provider
+2. 可选配置服务端默认 API Key
    `GEMINI_API_KEY=...`
+   `ARK_CODING_PLAN_API_KEY=...`
 3. 可选配置
-   `GEMINI_MODEL=gemini-2.5-pro`
-   `OPENAI_COMPAT_API_KEY=...`
-   `OPENAI_COMPAT_BASE_URL=https://openrouter.ai/api/v1`
-   `OPENAI_COMPAT_MODEL=openai/gpt-4.1-mini`
-   `OPENAI_COMPAT_ALLOWED_HOSTS=openrouter.ai,api.openai.com`
    `CACHE_TTL_HOURS=24`
-   `ENABLE_BILIBILI=false`
 4. 启动应用
    `npm run dev`
+
+说明：
+
+- 用户也可以在浏览器设置面板里分别为 Gemini / 方舟填写本地 API Key
+- 分享链接只保留 `video` 与 `provider`，不会暴露 `modelId` 或 `apiKey`
 
 ## 质量门
 

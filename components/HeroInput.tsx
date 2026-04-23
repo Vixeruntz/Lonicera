@@ -1,13 +1,14 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ArrowRight, CheckCircle2, CircleAlert, Youtube } from 'lucide-react';
 
-import { AppCapabilities, LoadingState, ProviderCapability } from '../types';
+import { AppCapabilities, LoadingState, ProviderCapability, ProviderModelOption } from '../types';
 
 interface HeroInputProps {
   onAnalyze: (url: string) => void;
   loadingState: LoadingState;
   capabilities: AppCapabilities | null;
   selectedProvider: ProviderCapability | null;
+  selectedModel: ProviderModelOption | null;
   capabilitiesError?: string;
 }
 
@@ -30,6 +31,7 @@ export const HeroInput: React.FC<HeroInputProps> = ({
   loadingState,
   capabilities,
   selectedProvider,
+  selectedModel,
   capabilitiesError,
 }) => {
   const [url, setUrl] = useState('');
@@ -37,11 +39,6 @@ export const HeroInput: React.FC<HeroInputProps> = ({
 
   const enabledSources = useMemo(
     () => capabilities?.sources.filter((source) => source.enabled) ?? [],
-    [capabilities]
-  );
-
-  const disabledSources = useMemo(
-    () => capabilities?.sources.filter((source) => !source.enabled) ?? [],
     [capabilities]
   );
 
@@ -56,22 +53,22 @@ export const HeroInput: React.FC<HeroInputProps> = ({
   const handleSubmit = (event: React.FormEvent) => {
     event.preventDefault();
     const parsed = safeParseUrl(url.trim());
-    if (!parsed || !selectedProvider) return;
+    if (!parsed || !selectedProvider || !selectedModel) return;
     onAnalyze(parsed.toString());
   };
 
   const isLoading = loadingState !== LoadingState.IDLE;
-  const canSubmit = !isLoading && Boolean(selectedProvider) && isValidUrl === true;
+  const canSubmit = !isLoading && Boolean(selectedProvider) && Boolean(selectedModel) && isValidUrl === true;
 
   return (
     <div className="flex flex-col items-center justify-center min-h-[75vh] max-w-4xl mx-auto px-6 text-center animate-fade-in-up">
       <div className="mb-12">
         <h1 className="font-serif text-5xl md:text-7xl text-ink font-medium tracking-tight mb-6">
-          把视频整理成一篇
+          把 YouTube 视频整理成一篇
           <span className="italic text-amber-700/90 font-serif">可信的长文</span>
         </h1>
         <p className="text-lg md:text-xl text-stone-500 max-w-2xl mx-auto font-light leading-relaxed">
-          现在所有生成都经过服务端校验、字幕抽取、模型适配和缓存治理；前端只负责发起请求与展示结果。
+          现在所有生成都经过服务端校验、字幕抽取、模型白名单选择和缓存治理；前端只负责发起请求与展示结果。
         </p>
       </div>
 
@@ -89,7 +86,7 @@ export const HeroInput: React.FC<HeroInputProps> = ({
                 setUrl(parsed.toString());
               }
             }}
-            placeholder="Paste a supported video link..."
+            placeholder="Paste a YouTube link..."
             disabled={isLoading}
             className="w-full bg-transparent border-b border-stone-300 py-4 pl-4 pr-16 text-xl font-sans text-ink placeholder:text-stone-300 focus:outline-none focus:border-ink transition-all placeholder:font-light"
           />
@@ -125,27 +122,21 @@ export const HeroInput: React.FC<HeroInputProps> = ({
                 {source.label}
               </span>
             ))}
-            {disabledSources.map((source) => (
-              <span
-                key={source.id}
-                className="inline-flex items-center rounded-full border border-stone-200 bg-stone-100 px-3 py-1 text-xs font-semibold tracking-wide text-stone-500"
-                title={source.reason}
-              >
-                {source.label} · unavailable
-              </span>
-            ))}
           </div>
 
           <div className="text-sm text-stone-500 leading-relaxed space-y-2">
             <p>
               当前模型:
               <span className="ml-2 font-medium text-ink">
-                {selectedProvider ? `${selectedProvider.label} (${selectedProvider.model})` : '无可用模型'}
+                {selectedProvider && selectedModel
+                  ? `${selectedProvider.label} (${selectedModel.label})`
+                  : '无可用模型'}
               </span>
             </p>
+            <p>当前仅支持 YouTube 链接；不再展示或尝试 Bilibili 路径。</p>
             {capabilitiesError && <p className="text-rose-600">{capabilitiesError}</p>}
             {!capabilitiesError && !selectedProvider && (
-              <p className="text-amber-700">服务端没有可用模型时，前端不会尝试在浏览器里直接生成内容。</p>
+              <p className="text-amber-700">服务端没有可用 provider 描述时，前端不会尝试在浏览器里直接生成内容。</p>
             )}
           </div>
         </div>

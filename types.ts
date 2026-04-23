@@ -26,8 +26,19 @@ export interface ProcessingLog {
   message: string;
 }
 
-export type VideoSourceId = 'youtube' | 'bilibili';
+export const VIDEO_SOURCE_IDS = ['youtube'] as const;
+export type VideoSourceId = (typeof VIDEO_SOURCE_IDS)[number];
+
+export const PROVIDER_IDS = ['gemini', 'ark-coding-plan'] as const;
+export type ProviderId = (typeof PROVIDER_IDS)[number];
 export type ProviderKind = 'gemini' | 'openai-compatible';
+
+export const GEMINI_MODEL_IDS = ['gemini-3-pro-preview', 'gemini-3-flash-preview'] as const;
+export const ARK_CODING_PLAN_MODEL_ID = 'ark-code-latest' as const;
+export const PROVIDER_MODEL_IDS = [...GEMINI_MODEL_IDS, ARK_CODING_PLAN_MODEL_ID] as const;
+export type ProviderModelId = (typeof PROVIDER_MODEL_IDS)[number];
+
+export const ARK_CODING_PLAN_BASE_URL = 'https://ark.cn-beijing.volces.com/api/coding/v3';
 
 export interface SourceCapability {
   id: VideoSourceId;
@@ -36,11 +47,18 @@ export interface SourceCapability {
   reason?: string;
 }
 
+export interface ProviderModelOption {
+  id: ProviderModelId;
+  label: string;
+  description?: string;
+}
+
 export interface ProviderCapability {
-  id: string;
+  id: ProviderId;
   label: string;
   kind: ProviderKind;
-  model: string;
+  defaultModelId: ProviderModelId;
+  models: ProviderModelOption[];
   enabled: boolean;
   description?: string;
 }
@@ -48,15 +66,15 @@ export interface ProviderCapability {
 export interface AppCapabilities {
   sources: SourceCapability[];
   providers: ProviderCapability[];
-  defaultProviderId: string | null;
+  defaultProviderId: ProviderId | null;
   cacheTtlHours: number;
 }
 
 export interface ArticleResponseMeta {
   sourceId: VideoSourceId;
-  providerId: string;
+  providerId: ProviderId;
   providerLabel: string;
-  modelId: string;
+  modelId: ProviderModelId;
   cacheKey: string;
   cached: boolean;
   createdAt: number;
@@ -68,3 +86,6 @@ export interface AnalyzeArticleResponse {
   article: ArticleData;
   meta: ArticleResponseMeta;
 }
+
+export type SelectedModelByProvider = Partial<Record<ProviderId, ProviderModelId>>;
+export type StoredProviderApiKeys = Partial<Record<ProviderId, string>>;

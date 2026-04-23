@@ -7,7 +7,6 @@ import { parseHttpUrl } from '../utils/network';
 import { withTimeout } from '../utils/timeout';
 
 const YOUTUBE_HOSTS = ['youtube.com', 'www.youtube.com', 'm.youtube.com', 'music.youtube.com', 'youtu.be'];
-const BILIBILI_HOSTS = ['bilibili.com', 'www.bilibili.com', 'm.bilibili.com', 'b23.tv'];
 
 export interface ExtractedVideo {
   sourceId: VideoSourceId;
@@ -49,11 +48,6 @@ export function extractYouTubeVideoId(url: URL) {
   return pathMatch?.[1]?.slice(0, 11) ?? null;
 }
 
-export function extractBilibiliVideoId(url: URL) {
-  const pathSegments = url.pathname.split('/').filter(Boolean);
-  return pathSegments.find((segment) => /^bv[0-9a-z]+$/i.test(segment) || /^av\d+$/i.test(segment)) ?? null;
-}
-
 async function fetchJson(url: string, timeoutMs: number) {
   const response = await withTimeout(fetch(url), timeoutMs, 'Remote metadata request');
   if (!response.ok) {
@@ -81,7 +75,7 @@ class YoutubeVideoAdapter implements VideoAdapter {
   async extract(url: URL): Promise<ExtractedVideo> {
     const videoId = extractYouTubeVideoId(url);
     if (!videoId) {
-      throw new AppError(400, 'unsupported_video_url', '无法从该 YouTube 链接中提取视频 ID');
+      throw new AppError(400, 'unsupported_video_url', '无法从该 YouTube 链接中提取视频 ID。');
     }
 
     const canonicalUrl = `https://www.youtube.com/watch?v=${videoId}`;
@@ -128,44 +122,11 @@ class YoutubeVideoAdapter implements VideoAdapter {
   }
 }
 
-class BilibiliVideoAdapter implements VideoAdapter {
-  public readonly capability: SourceCapability;
-
-  constructor(enabled: boolean) {
-    this.capability = {
-      id: 'bilibili',
-      label: 'Bilibili',
-      enabled,
-      reason: enabled ? undefined : '后端暂未配置 Bilibili 字幕提取能力，当前不会回退到“世界知识”生成。',
-    };
-  }
-
-  matches(url: URL) {
-    return hostMatches(url.hostname, BILIBILI_HOSTS);
-  }
-
-  async extract(url: URL): Promise<ExtractedVideo> {
-    const videoId = extractBilibiliVideoId(url) ?? 'unresolved';
-    if (!this.capability.enabled) {
-      throw new AppError(422, 'unsupported_source', this.capability.reason ?? 'Bilibili 当前不可用。');
-    }
-
-    throw new AppError(
-      501,
-      'unsupported_source',
-      `Bilibili 适配器已识别视频 ${videoId}，但字幕抓取尚未实现。请先使用 YouTube 链接。`
-    );
-  }
-}
-
 export class VideoSourceRegistry implements VideoSourceService {
   private readonly adapters: VideoAdapter[];
 
-  constructor(options: { enableBilibili: boolean; timeoutMs: number; logger: StructuredLogger }) {
-    this.adapters = [
-      new YoutubeVideoAdapter(options.timeoutMs, options.logger),
-      new BilibiliVideoAdapter(options.enableBilibili),
-    ];
+  constructor(options: { timeoutMs: number; logger: StructuredLogger }) {
+    this.adapters = [new YoutubeVideoAdapter(options.timeoutMs, options.logger)];
   }
 
   getCapabilities() {
@@ -176,7 +137,7 @@ export class VideoSourceRegistry implements VideoSourceService {
     const url = parseHttpUrl(input, 'videoUrl');
     const adapter = this.adapters.find((candidate) => candidate.matches(url));
     if (!adapter) {
-      throw new AppError(400, 'unsupported_video_url', '目前仅支持后端已声明的平台链接。');
+      throw new AppError(400, 'unsupported_video_url', '当前仅支持 YouTube 链接。');
     }
     return adapter.extract(url);
   }

@@ -1,9 +1,8 @@
 import crypto from 'crypto';
 
-import { AppCapabilities, AnalyzeArticleResponse, ArticleData } from '../../types';
-import { LlmProviderService } from '../adapters/llm';
+import { AnalyzeArticleResponse, ArticleData, ProviderId, ProviderModelId } from '../../types';
+import { ArticleGenerationRequest, LlmProviderService } from '../adapters/llm';
 import { VideoSourceService } from '../adapters/video';
-import { AppError } from '../errors';
 import { StructuredLogger } from '../logger';
 import { ArticleRecord } from '../schemas';
 import { ArticleCacheStore } from './cache-store';
@@ -12,10 +11,10 @@ function estimateReadingTime(content: string) {
   return Math.max(1, Math.ceil(content.length / 450));
 }
 
-function buildCacheKey(providerId: string, canonicalUrl: string) {
+function buildCacheKey(providerId: ProviderId, modelId: ProviderModelId, canonicalUrl: string) {
   return crypto
     .createHash('sha256')
-    .update(JSON.stringify({ version: 3, providerId, canonicalUrl }))
+    .update(JSON.stringify({ version: 4, providerId, modelId, canonicalUrl }))
     .digest('hex');
 }
 
@@ -37,7 +36,7 @@ export class ArticlePipeline {
     }
   ) {}
 
-  getCapabilities(): AppCapabilities {
+  getCapabilities() {
     return {
       sources: this.dependencies.videoSources.getCapabilities(),
       providers: this.dependencies.providers.getCapabilities(),
@@ -46,21 +45,31 @@ export class ArticlePipeline {
     };
   }
 
-  async generateArticle(input: { videoUrl: string; providerId?: string; requestId: string }) {
+  async generateArticle(input: {
+    videoUrl: string;
+    providerId: ProviderId;
+    modelId: ProviderModelId;
+    apiKey?: string;
+    requestId: string;
+  }) {
     const extractedVideo = await this.dependencies.videoSources.extractFromUrl(input.videoUrl);
-    const providerId = input.providerId ?? this.dependencies.providers.getDefaultProviderId() ?? undefined;
-
-    if (!providerId) {
-      throw new AppError(503, 'provider_unavailable', '服务器当前没有可用模型。');
-    }
-
-    const cacheKey = buildCacheKey(providerId, extractedVideo.canonicalUrl);
+    const generationRequest: ArticleGenerationRequest = {
+      providerId: input.providerId,
+      modelId: input.modelId,
+      apiKey: input.apiKey,
+    };
+    const cacheKey = buildCacheKey(
+      generationRequest.providerId,
+      generationRequest.modelId,
+      extractedVideo.canonicalUrl
+    );
     const cachedRecord = await this.dependencies.cacheStore.get(cacheKey);
     if (cachedRecord && isFresh(cachedRecord)) {
       this.dependencies.logger.info('article.cache.hit', {
         requestId: input.requestId,
         cacheKey,
-        providerId,
+        providerId: generationRequest.providerId,
+        modelId: generationRequest.modelId,
       });
       return this.toResponse(cachedRecord, true);
     }
@@ -70,14 +79,15 @@ export class ArticlePipeline {
       this.dependencies.logger.info('article.cache.deduplicated', {
         requestId: input.requestId,
         cacheKey,
-        providerId,
+        providerId: generationRequest.providerId,
+        modelId: generationRequest.modelId,
       });
       return inflight;
     }
 
     const generationPromise = this.generateAndCache({
       requestId: input.requestId,
-      providerId,
+      generationRequest,
       cacheKey,
       extractedVideo,
     }).finally(() => {
@@ -90,16 +100,15 @@ export class ArticlePipeline {
 
   private async generateAndCache(input: {
     requestId: string;
-    providerId: string;
+    generationRequest: ArticleGenerationRequest;
     cacheKey: string;
     extractedVideo: Awaited<ReturnType<VideoSourceService['extractFromUrl']>>;
   }) {
     const generated = await this.dependencies.providers.generateArticle(
-      input.providerId,
+      input.generationRequest,
       {
         canonicalUrl: input.extractedVideo.canonicalUrl,
-        sourceLabel:
-          input.extractedVideo.sourceId === 'youtube' ? 'YouTube' : 'Bilibili',
+        sourceLabel: 'YouTube',
         sourceTitle: input.extractedVideo.title,
         sourceAuthor: input.extractedVideo.author,
         transcript: input.extractedVideo.transcript,
@@ -131,6 +140,7 @@ export class ArticlePipeline {
       requestId: input.requestId,
       cacheKey: input.cacheKey,
       providerId: generated.providerId,
+      modelId: generated.modelId,
       sourceId: input.extractedVideo.sourceId,
     });
     return this.toResponse(record, false);

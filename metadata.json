@@ -1,5 +1,5 @@
 {
   "name": "视频炼金术：深度阅读",
-  "description": "通过服务端受控流程，将已启用视频源的字幕整理为高质量中文长文。",
+  "description": "通过服务端受控流程，将 YouTube 字幕整理为高质量中文长文，并支持 Gemini / 方舟固定模型预设。",
   "requestFramePermissions": []
 }
